@@ -1,0 +1,12 @@
+{
+  "comment_id": "c1",
+  "pred_label": "gpt",
+  "confidence": 0.91,
+  "ai_score": 0.93,
+  "top2": [
+    ["gpt", 0.91],
+    ["gemini", 0.06]
+  ],
+  "risk_level": "high",
+  "reason": "stage1 ai probability 0.93 passed threshold 0.85; stage2 predicted gpt"
+}

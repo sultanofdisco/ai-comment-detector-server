@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+logs/
+
+saved_models/stage1_kcbert_binary/**
+!saved_models/stage1_kcbert_binary/
+!saved_models/stage1_kcbert_binary/.gitkeep
+
+saved_models/stage2_llm_hybrid/**
+!saved_models/stage2_llm_hybrid/
+!saved_models/stage2_llm_hybrid/.gitkeep
+

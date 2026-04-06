@@ -1,0 +1,11 @@
+{
+  "total_predictions": 128,
+  "llm_classified_predictions": 74,
+  "by_label": [
+    { "label": "gpt", "count": 29, "ratio": 0.3919 },
+    { "label": "claude", "count": 18, "ratio": 0.2432 },
+    { "label": "gemini", "count": 15, "ratio": 0.2027 },
+    { "label": "deepseek", "count": 12, "ratio": 0.1622 }
+  ],
+  "stage2_model_version": "stage2_llm_hybrid"
+}

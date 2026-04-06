@@ -1,0 +1,9 @@
+{
+  "status": "ok",
+  "stage1_model_dir": "saved_models/stage1_kcbert_binary",
+  "stage2_model_dir": "saved_models/stage2_llm_hybrid",
+  "device": "cpu",
+  "ai_threshold": 0.85,
+  "stage1_model_version": "stage1_kcbert_binary",
+  "stage2_model_version": "stage2_llm_hybrid"
+}
