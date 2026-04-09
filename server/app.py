@@ -33,7 +33,9 @@ def get_predictor() -> TwoStagePredictor:
         settings.stage1_model_dir,
         settings.stage2_model_dir,
         settings.device,
+        settings.ai_threshold,
         settings.llm_threshold,
+        settings.llm_confidence_threshold,
     )
 
 
@@ -57,7 +59,9 @@ def health_check() -> HealthResponse:
         stage1_model_dir=str(settings.stage1_model_dir),
         stage2_model_dir=str(settings.stage2_model_dir),
         device=settings.device,
-        ai_threshold=settings.llm_threshold,
+        ai_threshold=settings.ai_threshold,
+        llm_threshold=settings.llm_threshold,
+        llm_confidence_threshold=settings.llm_confidence_threshold,
         stage1_model_version=predictor.stage1_model_version,
         stage2_model_version=predictor.stage2_model_version,
     )
@@ -87,7 +91,9 @@ def predict(request: PredictRequest) -> PredictResponse:
         "confidence": result["confidence"],
         "ai_score": result["ai_score"],
         "risk_level": result["risk_level"],
-        "ai_threshold": settings.llm_threshold,
+        "ai_threshold": settings.ai_threshold,
+        "llm_threshold": settings.llm_threshold,
+        "llm_confidence_threshold": settings.llm_confidence_threshold,
         "stage1_model_version": result["stage1_model_version"],
         "stage2_model_version": result["stage2_model_version"],
     }

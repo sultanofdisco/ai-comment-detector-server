@@ -29,6 +29,8 @@ class HealthResponse(BaseModel):
     stage2_model_dir: str
     device: str
     ai_threshold: float
+    llm_threshold: float
+    llm_confidence_threshold: float
     stage1_model_version: str | None = None
     stage2_model_version: str | None = None
 

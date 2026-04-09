@@ -27,7 +27,11 @@ class Settings:
     prediction_log_path: Path = Path(
         os.getenv("PREDICTION_LOG_PATH", str(BASE_DIR / "logs" / "predictions.jsonl"))
     )
-    llm_threshold: float = float(os.getenv("LLM_THRESHOLD", "0.85"))
+    ai_threshold: float = float(os.getenv("AI_THRESHOLD", "0.85"))
+    llm_threshold: float = float(os.getenv("LLM_THRESHOLD", "0.92"))
+    llm_confidence_threshold: float = float(
+        os.getenv("LLM_CONFIDENCE_THRESHOLD", "0.97")
+    )
     device: str = os.getenv(
         "MODEL_DEVICE",
         "cuda" if torch.cuda.is_available() else "cpu",

@@ -133,10 +133,14 @@ class TwoStagePredictor:
         stage1_model_dir: str | Path,
         stage2_model_dir: str | Path,
         device: str = "cpu",
+        ai_threshold: float = 0.7,
         llm_threshold: float = 0.85,
+        llm_confidence_threshold: float = 0.95,
     ) -> None:
         self.stage1 = KcBertBinaryPredictor(stage1_model_dir, device)
+        self.ai_threshold = ai_threshold
         self.llm_threshold = llm_threshold
+        self.llm_confidence_threshold = llm_confidence_threshold
         self.stage2: HybridLlmPredictor | None = None
 
         try:
@@ -159,7 +163,7 @@ class TwoStagePredictor:
         ai_score = float(stage1_result["ai_score"])
         risk_level = self._compute_risk_level(ai_score)
 
-        if stage1_result["pred_label"] == "human":
+        if ai_score < 0.5:
             return {
                 "pred_label": "human",
                 "confidence": float(stage1_result["confidence"]),
@@ -170,6 +174,23 @@ class TwoStagePredictor:
                     f"stage1 kcbert predicted human with ai probability {ai_score:.2f}"
                 ),
                 "stage1_pred_label": "human",
+                "stage1_model_version": self.stage1_model_version,
+                "stage2_pred_label": None,
+                "stage2_model_version": self.stage2_model_version,
+            }
+
+        if ai_score < self.ai_threshold:
+            return {
+                "pred_label": "uncertain",
+                "confidence": float(stage1_result["confidence"]),
+                "ai_score": ai_score,
+                "top2": stage1_result["top2"],
+                "risk_level": risk_level,
+                "reason": (
+                    f"stage1 ai probability {ai_score:.2f} is above human cutoff 0.50 "
+                    f"but below ai threshold {self.ai_threshold:.2f}"
+                ),
+                "stage1_pred_label": "uncertain",
                 "stage1_model_version": self.stage1_model_version,
                 "stage2_pred_label": None,
                 "stage2_model_version": self.stage2_model_version,
@@ -210,6 +231,25 @@ class TwoStagePredictor:
             }
 
         stage2_result = self.stage2.predict(text)
+        if float(stage2_result["confidence"]) < self.llm_confidence_threshold:
+            return {
+                "pred_label": "ai",
+                "confidence": float(stage1_result["confidence"]),
+                "ai_score": ai_score,
+                "top2": stage2_result["top2"],
+                "risk_level": risk_level,
+                "reason": (
+                    f"stage1 ai probability {ai_score:.2f} passed threshold "
+                    f"{self.llm_threshold:.2f}, but stage2 confidence "
+                    f"{stage2_result['confidence']:.2f} was below "
+                    f"{self.llm_confidence_threshold:.2f}"
+                ),
+                "stage1_pred_label": "ai",
+                "stage1_model_version": self.stage1_model_version,
+                "stage2_pred_label": None,
+                "stage2_model_version": self.stage2_model_version,
+            }
+
         return {
             "pred_label": stage2_result["pred_label"],
             "confidence": float(stage2_result["confidence"]),

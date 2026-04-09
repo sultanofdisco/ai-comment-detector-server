@@ -1,0 +1,4 @@
+reply_text,post_text,source_url,review_label,bucket,notes
+"축하드립니다!!","","https://x.com/example/status/1","human","축하/응원","모델이 AI로 잘못 본 실제 인간 댓글"
+"수고 많으셨어요 ㅠㅠ","","https://x.com/example/status/2","human","공감/위로","짧은 공감형 답글"
+"ㅋㅋㅋ 진짜 웃기네","","https://x.com/example/status/3","human","짧은 반응","짧은 리액션"
