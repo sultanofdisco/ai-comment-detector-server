@@ -26,7 +26,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.preprocess import STAT_FEATURES, build_stats_frame, normalize_text, prepare_model_text
+from server.preprocess import (
+    RAW_MODEL_TEXT_TRANSFORM,
+    STAT_FEATURES,
+    X_MODEL_TEXT_TRANSFORM,
+    add_model_special_tokens,
+    build_stats_frame,
+    normalize_text,
+    prepare_model_text,
+)
 
 
 class TextDataset(torch.utils.data.Dataset):
@@ -64,6 +72,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional comma-separated labels to keep, e.g. deepseek,gemini,gpt,claude",
     )
     parser.add_argument("--model-name", default="beomi/kcbert-base", help="HF model name.")
+    parser.add_argument(
+        "--model-text-transform",
+        default=RAW_MODEL_TEXT_TRANSFORM,
+        choices=[RAW_MODEL_TEXT_TRANSFORM, X_MODEL_TEXT_TRANSFORM],
+        help="Pre-tokenization text transform to apply before encoding.",
+    )
     parser.add_argument("--max-length", type=int, default=128, help="Max token length.")
     parser.add_argument("--epochs", type=int, default=3, help="Training epochs.")
     parser.add_argument("--train-batch-size", type=int, default=16, help="Train batch size.")
@@ -260,7 +274,9 @@ def main() -> None:
 
     df = df.copy()
     df[raw_text_col] = df[args.text_col].map(normalize_text)
-    df[model_text_col] = df[raw_text_col].map(prepare_model_text)
+    df[model_text_col] = df[raw_text_col].map(
+        lambda text: prepare_model_text(text, args.model_text_transform)
+    )
     df[args.label_col] = df[args.label_col].astype(str).str.lower().str.strip()
     df = df[df[model_text_col].ne("")]
 
@@ -326,6 +342,15 @@ def main() -> None:
     stats_prob_test = xgb_model.predict_proba(test_df[feature_order])
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    bert_model = AutoModelForSequenceClassification.from_pretrained(
+        args.model_name,
+        num_labels=num_labels,
+    )
+    num_added_special_tokens = add_model_special_tokens(
+        tokenizer,
+        bert_model,
+        args.model_text_transform,
+    )
     train_encodings = tokenizer(
         train_df[model_text_col].tolist(),
         truncation=True,
@@ -344,11 +369,6 @@ def main() -> None:
 
     train_dataset = TextDataset(train_encodings, train_df["target"].tolist())
     val_dataset = TextDataset(val_encodings, val_df["target"].tolist())
-    bert_model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_name,
-        num_labels=num_labels,
-    )
-
     bert_output_dir = output_dir / "bert_classifier"
     training_args_kwargs = {
         "output_dir": str(output_dir / "trainer_runs"),
@@ -387,6 +407,8 @@ def main() -> None:
     )
 
     print("Training KcBERT...")
+    print(f"Model text transform: {args.model_text_transform}")
+    print(f"Added special tokens: {num_added_special_tokens}")
     trainer.train()
     trainer.save_model(str(bert_output_dir))
     tokenizer.save_pretrained(str(bert_output_dir))
@@ -468,7 +490,7 @@ def main() -> None:
         "stats_features": feature_order,
         "max_length": args.max_length,
         "text_col": args.text_col,
-        "model_text_transform": "raw_to_special_tokens",
+        "model_text_transform": args.model_text_transform,
         "label_col": args.label_col,
         "label_classes": label_encoder.classes_.tolist(),
     }
