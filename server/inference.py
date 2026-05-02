@@ -9,7 +9,12 @@ import numpy as np
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from server.preprocess import build_stats_frame, normalize_text, prepare_model_text
+from server.preprocess import (
+    LEGACY_MODEL_TEXT_TRANSFORM,
+    build_stats_frame,
+    normalize_text,
+    prepare_model_text,
+)
 
 
 class BaseTextPredictor:
@@ -29,6 +34,9 @@ class BaseTextPredictor:
         self.model_version = self.metadata.get("model_version", self.model_dir.name)
         self.max_length = int(self.metadata["max_length"])
         self.label_classes = list(self.metadata["label_classes"])
+        self.model_text_transform = str(
+            self.metadata.get("model_text_transform", LEGACY_MODEL_TEXT_TRANSFORM)
+        )
 
         text_model_dir = self.model_dir / self.metadata["text_model_subdir"]
         self.tokenizer = AutoTokenizer.from_pretrained(text_model_dir)
@@ -63,7 +71,7 @@ class KcBertBinaryPredictor(BaseTextPredictor):
         if not normalized_text:
             raise ValueError("Text must not be empty.")
 
-        model_text = prepare_model_text(normalized_text)
+        model_text = prepare_model_text(normalized_text, self.model_text_transform)
         probabilities = self._predict_text_proba(model_text)[0]
         scores = [
             {"label": label, "score": float(score)}
@@ -106,7 +114,7 @@ class HybridLlmPredictor(BaseTextPredictor):
         if not normalized_text:
             raise ValueError("Text must not be empty.")
 
-        model_text = prepare_model_text(normalized_text)
+        model_text = prepare_model_text(normalized_text, self.model_text_transform)
         text_proba = self._predict_text_proba(model_text)
         stats_proba = self._predict_stats_proba(normalized_text)
         hybrid_proba = (self.text_weight * text_proba) + (self.stats_weight * stats_proba)

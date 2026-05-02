@@ -30,7 +30,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.preprocess import normalize_text, prepare_model_text
+from server.preprocess import (
+    LEGACY_MODEL_TEXT_TRANSFORM,
+    X_MODEL_TEXT_TRANSFORM,
+    add_model_special_tokens,
+    normalize_text,
+    prepare_model_text,
+)
 
 
 SPLIT_DEDUP_PRIORITY = {
@@ -138,6 +144,12 @@ def parse_args() -> argparse.Namespace:
         "--model-name",
         default="beomi/kcbert-base",
         help="HF model name.",
+    )
+    parser.add_argument(
+        "--model-text-transform",
+        default=LEGACY_MODEL_TEXT_TRANSFORM,
+        choices=[LEGACY_MODEL_TEXT_TRANSFORM, X_MODEL_TEXT_TRANSFORM],
+        help="Pre-tokenization text transform to apply before encoding.",
     )
     parser.add_argument(
         "--max-length",
@@ -528,7 +540,9 @@ def main() -> None:
     if not args.disable_dedup:
         df, dedup_removed = deduplicate_dataset(df, dedup_col, args.split_col)
 
-    df[args.text_col] = df[args.text_col].map(prepare_model_text)
+    df[args.text_col] = df[args.text_col].map(
+        lambda text: prepare_model_text(text, args.model_text_transform)
+    )
     df = df[df[args.text_col].ne("")].copy()
     df["binary_label"] = np.where(
         df[args.label_col].eq(args.human_label.lower()),
@@ -563,6 +577,15 @@ def main() -> None:
     test_df["target"] = test_df["binary_label"].map(label_to_id)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    bert_model = AutoModelForSequenceClassification.from_pretrained(
+        args.model_name,
+        num_labels=2,
+    )
+    num_added_special_tokens = add_model_special_tokens(
+        tokenizer,
+        bert_model,
+        args.model_text_transform,
+    )
     train_encodings = tokenizer(
         train_df[args.text_col].tolist(),
         truncation=True,
@@ -581,11 +604,6 @@ def main() -> None:
 
     train_dataset = TextDataset(train_encodings, train_df["target"].tolist())
     val_dataset = TextDataset(val_encodings, val_df["target"].tolist())
-    bert_model = AutoModelForSequenceClassification.from_pretrained(
-        args.model_name,
-        num_labels=2,
-    )
-
     class_weights = compute_class_weights(train_df["target"].tolist(), num_labels=2)
     bert_output_dir = output_dir / "bert_classifier"
     training_args_kwargs = {
@@ -630,6 +648,8 @@ def main() -> None:
     print(f"Original train source counts: {original_train_summary}")
     if balanced_train_summary is not None:
         print(f"Balanced train summary: {balanced_train_summary}")
+    print(f"Model text transform: {args.model_text_transform}")
+    print(f"Added special tokens: {num_added_special_tokens}")
     print(f"Class weights: {class_weights}")
 
     trainer.train()
@@ -747,7 +767,7 @@ def main() -> None:
         "positive_label": "ai",
         "negative_label": "human",
         "recommended_ai_threshold": round(selected_threshold, 4),
-        "model_text_transform": "transformed_text_or_raw_to_special_tokens",
+        "model_text_transform": args.model_text_transform,
     }
     with (output_dir / "artifacts.json").open("w", encoding="utf-8") as handle:
         json.dump(artifacts, handle, ensure_ascii=False, indent=2)
