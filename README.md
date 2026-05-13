@@ -5,8 +5,8 @@ This repo now follows a two-stage pipeline.
 ## Pipeline
 
 1. Stage 1:
-   KC-BERT binary classifier
-   input: transformed comment text
+   KC-BERT + stats hybrid binary classifier
+   input: comment text (+ optional parent post text for consistency stats)
    output: `human` or `ai`
 
 2. Stage 2:
@@ -23,6 +23,7 @@ The previous all-in-one `human + llm` 5-class path has been removed.
 {
   "comment_id": "c1",
   "author_id": "user123",
+  "post_text": "original post text",
   "text": "comment text",
   "url": "https://x.com/...",
   "timestamp": "2026-03-30T12:00:00Z"
@@ -84,11 +85,59 @@ python training/train_kcbert_binary.py ^
   --split-col split
 ```
 
+## Stage-1 hybrid training
+
+Preferred command for the plugin server:
+
+```bash
+python training/train_stage1_hybrid.py ^
+  --data-path "C:\Users\user\Downloads\dataset2_team_all_merged.csv" ^
+  --output-dir saved_models/hybrid_current ^
+  --model-name saved_models/stage1_kcbert_binary/bert_classifier ^
+  --text-col transformed_text ^
+  --raw-text-col reply_text ^
+  --post-col post_text ^
+  --label-col model_source ^
+  --split-col split
+```
+
+Main-server deployment target (leading reply mentions stripped, body mentions
+normalized to `<MENTION>`, consistency feature enabled, and stage-1 hybrid
+weights fixed to `text 0.8 / stats 0.2`):
+
+```bash
+python training/train_stage1_hybrid.py ^
+  --data-path "C:\Users\user\Downloads\dataset2_team_all_merged.csv" ^
+  --output-dir saved_models/hybrid_current ^
+  --model-name saved_models/stage1_kcbert_binary/bert_classifier ^
+  --text-col transformed_text ^
+  --raw-text-col reply_text ^
+  --post-col post_text ^
+  --label-col model_source ^
+  --split-col split ^
+  --force-text-weight 0.8
+```
+
+Notes:
+
+- `saved_models/hybrid_current` is the directory the server prefers by default.
+- `--force-text-weight 0.8` reuses the validation-selected threshold for the
+  `0.8 / 0.2` hybrid setting and writes that weight into `artifacts.json`.
+- The generated model directory is intentionally not committed here because one
+  trained artifact directory is about `1.6 GB`.
+- After training, verify `saved_models/hybrid_current/artifacts.json` contains:
+  - `model_text_transform = body_mentions_special_tokens_v1`
+  - `strip_leading_mentions = true`
+  - `text_weight = 0.8`
+  - `stats_weight = 0.2`
+  - `post_reply_cosine_similarity` inside `stats_features`
+
 ## Stage-2 training
 
 Default dataset columns:
 
 - text: `reply_text`
+- parent post text: `post_text` (optional, used for `post_reply_cosine_similarity`)
 - label: `model_source`
 - split: `split`
 
@@ -99,6 +148,7 @@ python training/train_hybrid.py ^
   --data-path "C:\Users\user\Downloads\dataset2_team_all_merged.csv" ^
   --output-dir saved_models/stage2_llm_hybrid ^
   --text-col reply_text ^
+  --post-col post_text ^
   --label-col model_source ^
   --split-col split
 ```
@@ -115,6 +165,35 @@ Stage 2 trains only on:
 ```bash
 uvicorn server.app:app --reload
 ```
+
+To run the plugin-facing server with the newer stage-2 model
+`stage2_llm_hybrid_consistency_20260504_text07`, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_plugin_server.ps1
+```
+
+This script prefers stage 1 on `saved_models/hybrid_current` when that folder
+contains trained artifacts, otherwise it falls back to
+`saved_models/stage1_kcbert_binary`. It switches stage 2 via `STAGE2_MODEL_DIR`
+and starts the same FastAPI app on
+`http://127.0.0.1:8000`.
+
+For the main-server stage-1 setup described above, retrain into
+`saved_models/hybrid_current` first and then start the server with the same
+script. No config-file change is needed if the trained artifacts exist in that
+folder.
+
+After startup, verify the loaded model with:
+
+```text
+GET /health
+```
+
+You should see:
+
+- `stage2_model_dir`: `.../saved_models/stage2_llm_hybrid_consistency_20260504_text07`
+- `stage2_model_version`: `stage2_llm_hybrid_consistency_20260504_text07`
 
 ## Tokenizer Special Tokens / 토크나이저 특수 토큰
 

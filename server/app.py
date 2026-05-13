@@ -71,7 +71,11 @@ def health_check() -> HealthResponse:
 def predict(request: PredictRequest) -> PredictResponse:
     try:
         predictor = get_predictor()
-        result = predictor.predict(request.text)
+        result = predictor.predict(
+            request.text,
+            post_text=request.post_text,
+            stage1_text=request.stage1_text,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -85,6 +89,10 @@ def predict(request: PredictRequest) -> PredictResponse:
         "author_id": request.author_id,
         "url": request.url,
         "client_timestamp": request.timestamp,
+        "stage1_text_provided": bool(request.stage1_text),
+        "stage1_text_differs_from_text": bool(
+            request.stage1_text and request.stage1_text.strip() != request.text.strip()
+        ),
         "final_pred_label": result["pred_label"],
         "stage1_pred_label": result["stage1_pred_label"],
         "stage2_pred_label": result["stage2_pred_label"],

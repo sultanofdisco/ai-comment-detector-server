@@ -10,12 +10,19 @@ import torch
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _default_stage1_model_dir() -> Path:
+    preferred = BASE_DIR / "saved_models" / "hybrid_current"
+    if (preferred / "artifacts.json").exists():
+        return preferred
+    return BASE_DIR / "saved_models" / "stage1_kcbert_binary"
+
+
 @dataclass(frozen=True)
 class Settings:
     stage1_model_dir: Path = Path(
         os.getenv(
             "STAGE1_MODEL_DIR",
-            str(BASE_DIR / "saved_models" / "stage1_kcbert_binary"),
+            str(_default_stage1_model_dir()),
         )
     )
     stage2_model_dir: Path = Path(

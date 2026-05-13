@@ -59,6 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-path", required=True, help="CSV path.")
     parser.add_argument("--output-dir", required=True, help="Directory to save trained artifacts.")
     parser.add_argument("--text-col", default="reply_text", help="Text column name.")
+    parser.add_argument(
+        "--post-col",
+        default="post_text",
+        help="Optional parent post text column for pairwise stats features.",
+    )
     parser.add_argument("--label-col", default="model_source", help="Label column name.")
     parser.add_argument("--split-col", default="split", help="Split column name.")
     parser.add_argument(
@@ -261,6 +266,7 @@ def choose_best_weight(
 def main() -> None:
     args = parse_args()
     raw_text_col = "__raw_text"
+    raw_post_text_col = "__raw_post_text"
     model_text_col = "__model_text"
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -274,6 +280,10 @@ def main() -> None:
 
     df = df.copy()
     df[raw_text_col] = df[args.text_col].map(normalize_text)
+    if args.post_col in df.columns:
+        df[raw_post_text_col] = df[args.post_col].map(normalize_text)
+    else:
+        df[raw_post_text_col] = ""
     df[model_text_col] = df[raw_text_col].map(
         lambda text: prepare_model_text(text, args.model_text_transform)
     )
@@ -298,7 +308,11 @@ def main() -> None:
     else:
         feature_order = STAT_FEATURES.copy()
 
-    extracted_stats = build_stats_frame(df[raw_text_col].tolist(), feature_order)
+    extracted_stats = build_stats_frame(
+        df[raw_text_col].tolist(),
+        feature_order,
+        post_texts=df[raw_post_text_col].tolist(),
+    )
     for feature in feature_order:
         df[feature] = extracted_stats[feature].astype(float)
 
@@ -490,6 +504,7 @@ def main() -> None:
         "stats_features": feature_order,
         "max_length": args.max_length,
         "text_col": args.text_col,
+        "post_col": args.post_col,
         "model_text_transform": args.model_text_transform,
         "label_col": args.label_col,
         "label_classes": label_encoder.classes_.tolist(),

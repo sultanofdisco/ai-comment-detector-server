@@ -31,11 +31,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.preprocess import (
+    BODY_MENTION_MODEL_TEXT_TRANSFORM,
     LEGACY_MODEL_TEXT_TRANSFORM,
     X_MODEL_TEXT_TRANSFORM,
     add_model_special_tokens,
     normalize_text,
     prepare_model_text,
+    strip_leading_reply_mentions,
 )
 
 
@@ -147,8 +149,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model-text-transform",
-        default=LEGACY_MODEL_TEXT_TRANSFORM,
-        choices=[LEGACY_MODEL_TEXT_TRANSFORM, X_MODEL_TEXT_TRANSFORM],
+        default=BODY_MENTION_MODEL_TEXT_TRANSFORM,
+        choices=[
+            BODY_MENTION_MODEL_TEXT_TRANSFORM,
+            LEGACY_MODEL_TEXT_TRANSFORM,
+            X_MODEL_TEXT_TRANSFORM,
+        ],
         help="Pre-tokenization text transform to apply before encoding.",
     )
     parser.add_argument(
@@ -216,6 +222,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=42,
         help="Random seed.",
+    )
+    parser.add_argument(
+        "--keep-leading-mentions",
+        action="store_true",
+        help="Keep leading reply mentions in stage-1 training inputs instead of stripping them.",
     )
     return parser.parse_args()
 
@@ -536,11 +547,23 @@ def main() -> None:
         df[source_col] = df[source_col].astype(str).str.lower().str.strip()
 
     dedup_col = choose_dedup_column(df, args.dedup_col, args.text_col)
+    strip_leading_mentions = not args.keep_leading_mentions
+    raw_source_col = "reply_text" if "reply_text" in df.columns else args.text_col
+    if strip_leading_mentions:
+        df["__stage1_source_text"] = df[raw_source_col].map(strip_leading_reply_mentions)
+        df["__dedup_source_text"] = df[raw_source_col].map(strip_leading_reply_mentions)
+    else:
+        df["__stage1_source_text"] = df[raw_source_col].map(normalize_text)
+        df["__dedup_source_text"] = df[dedup_col].map(normalize_text)
+
     dedup_removed = 0
     if not args.disable_dedup:
-        df, dedup_removed = deduplicate_dataset(df, dedup_col, args.split_col)
+        if strip_leading_mentions:
+            df, dedup_removed = deduplicate_dataset(df, "__dedup_source_text", args.split_col)
+        else:
+            df, dedup_removed = deduplicate_dataset(df, dedup_col, args.split_col)
 
-    df[args.text_col] = df[args.text_col].map(
+    df[args.text_col] = df["__stage1_source_text"].map(
         lambda text: prepare_model_text(text, args.model_text_transform)
     )
     df = df[df[args.text_col].ne("")].copy()
@@ -768,6 +791,8 @@ def main() -> None:
         "negative_label": "human",
         "recommended_ai_threshold": round(selected_threshold, 4),
         "model_text_transform": args.model_text_transform,
+        "strip_leading_mentions": strip_leading_mentions,
+        "effective_text_source_col": raw_source_col if strip_leading_mentions else args.text_col,
     }
     with (output_dir / "artifacts.json").open("w", encoding="utf-8") as handle:
         json.dump(artifacts, handle, ensure_ascii=False, indent=2)

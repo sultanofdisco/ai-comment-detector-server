@@ -1,6 +1,7 @@
 {
   "comment_id": "c1",
   "author_id": "user123",
+  "post_text": "원 게시글 내용",
   "text": "댓글 내용",
   "url": "https://x.com/example/status/1",
   "timestamp": "2026-03-30T12:00:00Z"

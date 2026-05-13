@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import re
 import string
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
+import torch
 
+
+POST_REPLY_SENTENCE_TRANSFORMER_MODEL_NAME = "jhgan/ko-sroberta-multitask"
+POST_REPLY_COSINE_SIMILARITY_FEATURE = "post_reply_cosine_similarity"
+POST_REPLY_EMBEDDING_BATCH_SIZE = 32
 
 STAT_FEATURES = [
     "rep_ratio",
@@ -19,12 +26,21 @@ STAT_FEATURES = [
     "has_enter",
     "enter_cnt",
     "space_cnt",
+    POST_REPLY_COSINE_SIMILARITY_FEATURE,
 ]
 
 LEGACY_MODEL_TEXT_TRANSFORM = "transformed_text_or_raw_to_special_tokens"
 RAW_MODEL_TEXT_TRANSFORM = "raw_to_special_tokens"
 X_MODEL_TEXT_TRANSFORM = "x_text_special_tokens_v1"
+BODY_MENTION_MODEL_TEXT_TRANSFORM = "body_mentions_special_tokens_v1"
 LEGACY_MODEL_SPECIAL_TOKENS = [
+    "<SPACE>",
+    "<ENTER>",
+    "<REP>",
+    "</REP>",
+]
+BODY_MENTION_MODEL_SPECIAL_TOKENS = [
+    "<MENTION>",
     "<SPACE>",
     "<ENTER>",
     "<REP>",
@@ -70,6 +86,10 @@ EMOJI_RANGES = (
 )
 URL_PATTERN = re.compile(r"https?://\S+|www\.\S+")
 MENTION_PATTERN = re.compile(r"@\w+")
+LEADING_REPLY_MENTION_BLOCK_PATTERN = re.compile(
+    r"^(?:@[A-Za-z0-9_]{1,15}(?:\s+|$))+",
+    flags=re.IGNORECASE,
+)
 HASHTAG_PATTERN = re.compile(r"#([가-힣A-Za-z0-9_]+)")
 THREE_PLUS_REPEAT_PATTERN = re.compile(r"(.)\1{2,}")
 
@@ -77,13 +97,89 @@ THREE_PLUS_REPEAT_PATTERN = re.compile(r"(.)\1{2,}")
 def normalize_text(text: str | None) -> str:
     if text is None:
         return ""
+    try:
+        if pd.isna(text):
+            return ""
+    except TypeError:
+        pass
     return str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def strip_leading_reply_mentions(text: str | None) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+    stripped = LEADING_REPLY_MENTION_BLOCK_PATTERN.sub("", normalized, count=1).lstrip()
+    return stripped
+
+
+def get_post_reply_embedding_device() -> str:
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+@lru_cache(maxsize=1)
+def get_post_reply_sentence_transformer():
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise ImportError(
+            "sentence-transformers is required to compute post_reply_cosine_similarity."
+        ) from exc
+
+    return SentenceTransformer(
+        POST_REPLY_SENTENCE_TRANSFORMER_MODEL_NAME,
+        device=get_post_reply_embedding_device(),
+    )
+
+
+def compute_post_reply_cosine_similarities(
+    post_texts: Iterable[str | None],
+    reply_texts: Iterable[str | None],
+) -> list[float]:
+    normalized_posts = [normalize_text(text) for text in post_texts]
+    normalized_replies = [normalize_text(text) for text in reply_texts]
+
+    if len(normalized_posts) != len(normalized_replies):
+        raise ValueError("post_texts and reply_texts must have the same length.")
+
+    similarities = np.zeros(len(normalized_replies), dtype=float)
+    valid_indices = [
+        index
+        for index, (post_text, reply_text) in enumerate(zip(normalized_posts, normalized_replies))
+        if post_text and reply_text
+    ]
+    if not valid_indices:
+        return similarities.tolist()
+
+    model = get_post_reply_sentence_transformer()
+    valid_posts = [normalized_posts[index] for index in valid_indices]
+    valid_replies = [normalized_replies[index] for index in valid_indices]
+
+    post_embeddings = model.encode(
+        valid_posts,
+        batch_size=POST_REPLY_EMBEDDING_BATCH_SIZE,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+    reply_embeddings = model.encode(
+        valid_replies,
+        batch_size=POST_REPLY_EMBEDDING_BATCH_SIZE,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+    valid_similarities = np.einsum("ij,ij->i", post_embeddings, reply_embeddings)
+    similarities[valid_indices] = np.clip(valid_similarities, -1.0, 1.0)
+    return similarities.tolist()
 
 
 def get_model_special_tokens(transform_name: str | None = None) -> list[str]:
     normalized = (transform_name or LEGACY_MODEL_TEXT_TRANSFORM).strip().lower()
     if normalized == X_MODEL_TEXT_TRANSFORM:
         return X_MODEL_SPECIAL_TOKENS.copy()
+    if normalized == BODY_MENTION_MODEL_TEXT_TRANSFORM:
+        return BODY_MENTION_MODEL_SPECIAL_TOKENS.copy()
     return LEGACY_MODEL_SPECIAL_TOKENS.copy()
 
 
@@ -107,6 +203,8 @@ def prepare_model_text(
     transform_name = (transform_name or LEGACY_MODEL_TEXT_TRANSFORM).strip().lower()
     if transform_name == X_MODEL_TEXT_TRANSFORM:
         return preprocess_x_text(normalized)
+    if transform_name == BODY_MENTION_MODEL_TEXT_TRANSFORM:
+        return transform_text_for_model_with_body_mentions(normalized)
     return transform_text_for_model(normalized)
 
 
@@ -214,7 +312,54 @@ def transform_text_for_model(text: str | None) -> str:
     return "".join(output)
 
 
-def extract_stat_features_from_text(text: str | None) -> dict[str, float]:
+def transform_text_for_model_with_body_mentions(text: str | None) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+
+    output: list[str] = []
+    index = 0
+
+    while index < len(normalized):
+        mention_match = MENTION_PATTERN.match(normalized, index)
+        if mention_match:
+            output.append("<MENTION>")
+            index = mention_match.end()
+            continue
+
+        char = normalized[index]
+
+        if char == "\n":
+            output.append("<ENTER>")
+            index += 1
+            continue
+
+        if char.isspace():
+            output.append("<SPACE>")
+            index += 1
+            continue
+
+        if char in REP_TOKEN_CHARS:
+            run_end = index + 1
+            while run_end < len(normalized) and normalized[run_end] == char:
+                run_end += 1
+
+            run_length = run_end - index
+            if run_length >= 2:
+                output.append(f"<REP> {char} {run_length} </REP>")
+                index = run_end
+                continue
+
+        output.append(char)
+        index += 1
+
+    return "".join(output)
+
+
+def extract_stat_features_from_text(
+    text: str | None,
+    post_reply_cosine_similarity: float = 0.0,
+) -> dict[str, float]:
     normalized = normalize_text(text)
     compact_text = re.sub(r"\s+", "", normalized)
     rep_span_count, rep_total_count = _count_repeated_char_runs(normalized)
@@ -235,6 +380,7 @@ def extract_stat_features_from_text(text: str | None) -> dict[str, float]:
         "has_enter": float("\n" in normalized),
         "enter_cnt": float(normalized.count("\n")),
         "space_cnt": float(normalized.count(" ")),
+        POST_REPLY_COSINE_SIMILARITY_FEATURE: float(post_reply_cosine_similarity),
         "rep_span_count": float(rep_span_count),
         "rep_total_count": float(rep_total_count),
     }
@@ -244,10 +390,25 @@ def extract_stat_features_from_text(text: str | None) -> dict[str, float]:
 def build_stats_frame(
     texts: Iterable[str | None],
     feature_order: list[str] | None = None,
+    post_texts: Iterable[str | None] | None = None,
 ) -> pd.DataFrame:
     feature_order = feature_order or STAT_FEATURES
+    reply_texts = list(texts)
+    parent_post_texts = list(post_texts) if post_texts is not None else [""] * len(reply_texts)
+
+    if len(parent_post_texts) != len(reply_texts):
+        raise ValueError("post_texts must have the same length as texts.")
+
+    if POST_REPLY_COSINE_SIMILARITY_FEATURE in feature_order:
+        consistency_scores = compute_post_reply_cosine_similarities(parent_post_texts, reply_texts)
+    else:
+        consistency_scores = [0.0] * len(reply_texts)
+
     rows = []
-    for text in texts:
-        extracted = extract_stat_features_from_text(text)
+    for text, consistency_score in zip(reply_texts, consistency_scores):
+        extracted = extract_stat_features_from_text(
+            text,
+            post_reply_cosine_similarity=consistency_score,
+        )
         rows.append({feature: extracted[feature] for feature in feature_order})
     return pd.DataFrame(rows, columns=feature_order)

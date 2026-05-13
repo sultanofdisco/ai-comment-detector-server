@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.preprocess import extract_stat_features_from_text, prepare_model_text
+from server.preprocess import build_stats_frame, prepare_model_text, strip_leading_reply_mentions
 
 
 OUTPUT_COLUMNS = [
@@ -33,6 +33,7 @@ OUTPUT_COLUMNS = [
     "has_enter",
     "enter_cnt",
     "space_cnt",
+    "post_reply_cosine_similarity",
 ]
 
 
@@ -80,15 +81,17 @@ def normalize_series(series: pd.Series) -> pd.Series:
 
 
 def build_output_frame(frame: pd.DataFrame, reply_col: str, post_col: str) -> pd.DataFrame:
-    reply_text = normalize_series(frame[reply_col])
+    reply_text = normalize_series(frame[reply_col]).map(strip_leading_reply_mentions)
     post_text = normalize_series(frame[post_col]) if post_col in frame.columns else pd.Series([""] * len(frame))
+    valid_pairs = [(post, reply) for post, reply in zip(post_text.tolist(), reply_text.tolist()) if reply]
+    valid_posts = [post for post, _ in valid_pairs]
+    valid_replies = [reply for _, reply in valid_pairs]
+    stats_frame = build_stats_frame(valid_replies, post_texts=valid_posts) if valid_replies else pd.DataFrame()
 
     rows: list[dict[str, object]] = []
-    for post, reply in zip(post_text.tolist(), reply_text.tolist()):
-        if not reply:
-            continue
+    for index, (post, reply) in enumerate(valid_pairs):
         transformed = prepare_model_text(reply)
-        stats = extract_stat_features_from_text(reply)
+        stats = stats_frame.iloc[index]
         rows.append(
             {
                 "post_text": post,
@@ -110,6 +113,7 @@ def build_output_frame(frame: pd.DataFrame, reply_col: str, post_col: str) -> pd
                 "has_enter": int(stats["has_enter"]),
                 "enter_cnt": int(stats["enter_cnt"]),
                 "space_cnt": int(stats["space_cnt"]),
+                "post_reply_cosine_similarity": float(stats["post_reply_cosine_similarity"]),
             }
         )
 

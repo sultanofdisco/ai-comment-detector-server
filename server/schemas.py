@@ -9,6 +9,14 @@ class PredictRequest(BaseModel):
     comment_id: str | None = Field(default=None, description="Client-side comment id.")
     author_id: str | None = Field(default=None, description="Comment author id.")
     text: str = Field(..., min_length=1, description="Comment text to analyze.")
+    stage1_text: str | None = Field(
+        default=None,
+        description="Optional text override used only for stage-1 human/ai detection.",
+    )
+    post_text: str | None = Field(
+        default=None,
+        description="Parent post text used for post-reply consistency stats.",
+    )
     url: str | None = Field(default=None, description="Comment page URL.")
     timestamp: str | None = Field(default=None, description="Comment timestamp from frontend.")
 
