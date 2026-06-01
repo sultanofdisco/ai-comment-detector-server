@@ -34,6 +34,9 @@ class Settings:
     prediction_log_path: Path = Path(
         os.getenv("PREDICTION_LOG_PATH", str(BASE_DIR / "logs" / "predictions.jsonl"))
     )
+    false_positive_export_path: Path = Path(
+        os.getenv("FALSE_POSITIVE_EXPORT_PATH", str(BASE_DIR / "logs" / "false_positives.csv"))
+    )
     ai_threshold: float = float(os.getenv("AI_THRESHOLD", "0.85"))
     llm_threshold: float = float(os.getenv("LLM_THRESHOLD", "0.92"))
     llm_confidence_threshold: float = float(

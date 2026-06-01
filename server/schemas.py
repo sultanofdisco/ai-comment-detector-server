@@ -56,6 +56,32 @@ class ModelUsageResponse(BaseModel):
     stage2_model_version: str | None = None
 
 
+class FalsePositiveFeedbackRequest(BaseModel):
+    cache_key: str | None = None
+    comment_id: str | None = None
+    author_id: str | None = None
+    text: str = Field(..., min_length=1, description="Comment text to export as a false positive.")
+    url: str | None = None
+    timestamp: str | None = None
+    root_post_id: str | None = None
+    root_post_author_id: str | None = None
+    root_post_text: str | None = None
+    root_post_url: str | None = None
+    root_post_timestamp: str | None = None
+    pred_label: str | None = None
+    confidence: float | None = None
+    ai_score: float | None = None
+    risk_level: str | None = None
+    export_source: str = Field(default="extension", description="Frontend surface that triggered the export.")
+
+
+class FalsePositiveFeedbackResponse(BaseModel):
+    status: str
+    exported_at: str
+    file_path: str
+    dedupe_key: str
+
+
 class ErrorResponse(BaseModel):
     detail: str
     extra: dict[str, Any] | None = None

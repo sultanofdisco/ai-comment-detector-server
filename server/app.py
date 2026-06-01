@@ -8,8 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from server.config import settings
 from server.inference import TwoStagePredictor
-from server.schemas import HealthResponse, ModelUsageResponse, PredictRequest, PredictResponse
-from server.stats import aggregate_prediction_usage, append_prediction_log
+from server.schemas import (
+    FalsePositiveFeedbackRequest,
+    FalsePositiveFeedbackResponse,
+    HealthResponse,
+    ModelUsageResponse,
+    PredictRequest,
+    PredictResponse,
+)
+from server.stats import (
+    aggregate_prediction_usage,
+    append_false_positive_feedback,
+    append_prediction_log,
+)
 
 
 app = FastAPI(
@@ -115,6 +126,21 @@ def predict(request: PredictRequest) -> PredictResponse:
         risk_level=result["risk_level"],
         reason=result["reason"],
     )
+
+
+@app.post("/feedback/false-positive", response_model=FalsePositiveFeedbackResponse)
+def export_false_positive(request: FalsePositiveFeedbackRequest) -> FalsePositiveFeedbackResponse:
+    try:
+        export_result = append_false_positive_feedback(
+            settings.false_positive_export_path,
+            request.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"False-positive export failed: {exc}") from exc
+
+    return FalsePositiveFeedbackResponse(**export_result)
 
 
 @app.get("/admin/model-usage", response_model=ModelUsageResponse)
