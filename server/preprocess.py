@@ -42,12 +42,23 @@ LAUGHTER_PATTERN = re.compile(r"(\u314b{2,}|\u314e{2,}|\u3160{2,}|\u315c{2,})")
 REPEATED_CHAR_PATTERN = re.compile(r"(.)\1+")
 REP_TOKEN_CHARS = {"?", "!", "\u314b", "\u314e", "\u3160", "\u315c", "~"}
 PRETRANSFORM_MARKERS = ("<SPACE>", "<ENTER>", "<REP>", "</REP>")
+LEADING_REPLY_MENTION_BLOCK_PATTERN = re.compile(
+    r"^(?:@[A-Za-z0-9_]{1,15}(?:\s+|$))+",
+    flags=re.IGNORECASE,
+)
 
 
 def normalize_text(text: str | None) -> str:
     if text is None:
         return ""
     return str(text).replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def strip_leading_reply_mentions(text: str | None) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+    return LEADING_REPLY_MENTION_BLOCK_PATTERN.sub("", normalized, count=1).lstrip()
 
 
 def prepare_model_text(text: str | None) -> str:

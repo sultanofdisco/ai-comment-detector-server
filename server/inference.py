@@ -10,7 +10,12 @@ import numpy as np
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from server.preprocess import build_stats_frame, normalize_text, prepare_model_text
+from server.preprocess import (
+    build_stats_frame,
+    normalize_text,
+    prepare_model_text,
+    strip_leading_reply_mentions,
+)
 
 
 class BaseTextPredictor:
@@ -285,14 +290,33 @@ class TwoStagePredictor:
                 f"{attention_text}모델 판단 결과 기계 학습의 전형적인 작위 문체에서 완전히 이탈하여 정상적인 인간 작성 댓글(신뢰도 {human_pct}%)로 안전하게 판명됩니다."
             )
 
-    def predict(self, text: str) -> dict[str, Any]:
-        stage1_result = self.stage1.predict(text)
+    def _resolve_stage1_input_text(
+        self,
+        text: str,
+        stage1_text: str | None = None,
+    ) -> str:
+        stage1_input_text = normalize_text(stage1_text) or text
+        if self.stage1.metadata.get("strip_leading_mentions", True):
+            stripped = strip_leading_reply_mentions(stage1_input_text)
+            if stripped:
+                stage1_input_text = stripped
+        return stage1_input_text
+
+    def predict(
+        self,
+        text: str,
+        post_text: str | None = None,
+        stage1_text: str | None = None,
+    ) -> dict[str, Any]:
+        stage1_input_text = self._resolve_stage1_input_text(text, stage1_text)
+        stage1_result = self.stage1.predict(stage1_input_text)
         ai_score = float(stage1_result["ai_score"])
         risk_level = self._compute_risk_level(ai_score)
+        xai_text = stage1_input_text or text
 
         if ai_score < 0.5:
             pred_label = "human"
-            reason = self._generate_xai_reason(text, ai_score, pred_label)
+            reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
             return {
                 "pred_label": pred_label,
                 "confidence": float(stage1_result["confidence"]),
@@ -308,7 +332,7 @@ class TwoStagePredictor:
 
         if ai_score < self.ai_threshold:
             pred_label = "uncertain"
-            reason = self._generate_xai_reason(text, ai_score, pred_label)
+            reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
             return {
                 "pred_label": pred_label,
                 "confidence": float(stage1_result["confidence"]),
@@ -324,7 +348,7 @@ class TwoStagePredictor:
 
         if ai_score < self.llm_threshold:
             pred_label = "ai"
-            reason = self._generate_xai_reason(text, ai_score, pred_label)
+            reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
             return {
                 "pred_label": pred_label,
                 "confidence": float(stage1_result["confidence"]),
@@ -340,7 +364,7 @@ class TwoStagePredictor:
 
         if self.stage2 is None:
             pred_label = "ai"
-            reason = self._generate_xai_reason(text, ai_score, pred_label)
+            reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
             return {
                 "pred_label": pred_label,
                 "confidence": float(stage1_result["confidence"]),
@@ -357,7 +381,7 @@ class TwoStagePredictor:
         stage2_result = self.stage2.predict(text)
         if float(stage2_result["confidence"]) < self.llm_confidence_threshold:
             pred_label = "ai"
-            reason = self._generate_xai_reason(text, ai_score, pred_label)
+            reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
             return {
                 "pred_label": pred_label,
                 "confidence": float(stage1_result["confidence"]),
@@ -372,7 +396,7 @@ class TwoStagePredictor:
             }
 
         pred_label = stage2_result["pred_label"]
-        reason = self._generate_xai_reason(text, ai_score, pred_label)
+        reason = self._generate_xai_reason(xai_text, ai_score, pred_label)
         return {
             "pred_label": pred_label,
             "confidence": float(stage2_result["confidence"]),

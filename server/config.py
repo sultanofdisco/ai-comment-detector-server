@@ -10,12 +10,19 @@ import torch
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _default_stage1_model_dir() -> Path:
+    preferred = BASE_DIR / "saved_models" / "hybrid_current"
+    if (preferred / "artifacts.json").exists():
+        return preferred
+    return BASE_DIR / "saved_models" / "stage1_kcbert_binary"
+
+
 @dataclass(frozen=True)
 class Settings:
     stage1_model_dir: Path = Path(
         os.getenv(
             "STAGE1_MODEL_DIR",
-            str(BASE_DIR / "saved_models" / "stage1_kcbert_binary"),
+            str(_default_stage1_model_dir()),
         )
     )
     stage2_model_dir: Path = Path(
@@ -26,6 +33,9 @@ class Settings:
     )
     prediction_log_path: Path = Path(
         os.getenv("PREDICTION_LOG_PATH", str(BASE_DIR / "logs" / "predictions.jsonl"))
+    )
+    false_positive_export_path: Path = Path(
+        os.getenv("FALSE_POSITIVE_EXPORT_PATH", str(BASE_DIR / "logs" / "false_positives.csv"))
     )
     ai_threshold: float = float(os.getenv("AI_THRESHOLD", "0.85"))
     llm_threshold: float = float(os.getenv("LLM_THRESHOLD", "0.92"))

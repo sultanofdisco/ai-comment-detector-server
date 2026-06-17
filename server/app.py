@@ -8,8 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from server.config import settings
 from server.inference import TwoStagePredictor
-from server.schemas import HealthResponse, ModelUsageResponse, PredictRequest, PredictResponse
-from server.stats import aggregate_prediction_usage, append_prediction_log
+from server.schemas import (
+    FalsePositiveFeedbackRequest,
+    FalsePositiveFeedbackResponse,
+    HealthResponse,
+    ModelUsageResponse,
+    PredictRequest,
+    PredictResponse,
+)
+from server.stats import (
+    aggregate_prediction_usage,
+    append_false_positive_feedback,
+    append_prediction_log,
+)
 
 
 app = FastAPI(
@@ -71,7 +82,11 @@ def health_check() -> HealthResponse:
 def predict(request: PredictRequest) -> PredictResponse:
     try:
         predictor = get_predictor()
-        result = predictor.predict(request.text)
+        result = predictor.predict(
+            request.text,
+            post_text=request.post_text,
+            stage1_text=request.stage1_text,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -85,6 +100,10 @@ def predict(request: PredictRequest) -> PredictResponse:
         "author_id": request.author_id,
         "url": request.url,
         "client_timestamp": request.timestamp,
+        "stage1_text_provided": bool(request.stage1_text),
+        "stage1_text_differs_from_text": bool(
+            request.stage1_text and request.stage1_text.strip() != request.text.strip()
+        ),
         "final_pred_label": result["pred_label"],
         "stage1_pred_label": result["stage1_pred_label"],
         "stage2_pred_label": result["stage2_pred_label"],
@@ -107,6 +126,21 @@ def predict(request: PredictRequest) -> PredictResponse:
         risk_level=result["risk_level"],
         reason=result["reason"],
     )
+
+
+@app.post("/feedback/false-positive", response_model=FalsePositiveFeedbackResponse)
+def export_false_positive(request: FalsePositiveFeedbackRequest) -> FalsePositiveFeedbackResponse:
+    try:
+        export_result = append_false_positive_feedback(
+            settings.false_positive_export_path,
+            request.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"False-positive export failed: {exc}") from exc
+
+    return FalsePositiveFeedbackResponse(**export_result)
 
 
 @app.get("/admin/model-usage", response_model=ModelUsageResponse)

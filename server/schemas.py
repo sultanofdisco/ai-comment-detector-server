@@ -9,6 +9,14 @@ class PredictRequest(BaseModel):
     comment_id: str | None = Field(default=None, description="Client-side comment id.")
     author_id: str | None = Field(default=None, description="Comment author id.")
     text: str = Field(..., min_length=1, description="Comment text to analyze.")
+    stage1_text: str | None = Field(
+        default=None,
+        description="Optional text override used only for stage-1 human/ai detection.",
+    )
+    post_text: str | None = Field(
+        default=None,
+        description="Parent post text used for post-reply consistency stats.",
+    )
     url: str | None = Field(default=None, description="Comment page URL.")
     timestamp: str | None = Field(default=None, description="Comment timestamp from frontend.")
 
@@ -46,6 +54,32 @@ class ModelUsageResponse(BaseModel):
     llm_classified_predictions: int
     by_label: list[UsageItem]
     stage2_model_version: str | None = None
+
+
+class FalsePositiveFeedbackRequest(BaseModel):
+    cache_key: str | None = None
+    comment_id: str | None = None
+    author_id: str | None = None
+    text: str = Field(..., min_length=1, description="Comment text to export as a false positive.")
+    url: str | None = None
+    timestamp: str | None = None
+    root_post_id: str | None = None
+    root_post_author_id: str | None = None
+    root_post_text: str | None = None
+    root_post_url: str | None = None
+    root_post_timestamp: str | None = None
+    pred_label: str | None = None
+    confidence: float | None = None
+    ai_score: float | None = None
+    risk_level: str | None = None
+    export_source: str = Field(default="extension", description="Frontend surface that triggered the export.")
+
+
+class FalsePositiveFeedbackResponse(BaseModel):
+    status: str
+    exported_at: str
+    file_path: str
+    dedupe_key: str
 
 
 class ErrorResponse(BaseModel):
